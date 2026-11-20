@@ -1,15 +1,56 @@
 const express = require("express");
 const cors = require("cors");
 
+const notFound = require("./middleware/notFound.middleware");
+const errorHandler = require("./middleware/error.middleware");
+
+const testRoutes = require("./modules/test/test.routes");
+const healthRoutes = require("./modules/health/health.routes");
+const authRoutes = require("./modules/auth/auth.routes");
+const categoryRoutes = require("./modules/categories/category.routes");
+const unitRoutes = require("./modules/units/unit.routes");
+const partyRoutes = require("./modules/parties/party.routes");
+const productRoutes = require("./modules/products/product.routes");
+
 const app = express();
 
-// Middlewares
+// Global middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
 
-// Test route
+// Root route
 app.get("/", (req, res) => {
-  res.send("ResolveStock API is running!");
+  res.status(200).json({
+    success: true,
+    message: "ResolveStock API is running!",
+  });
 });
+
+// Health routes
+app.use("/api/health", healthRoutes);
+
+// Test routes
+app.use("/api/test", testRoutes);
+
+// Authentication routes
+app.use("/api/auth", authRoutes);
+
+// Category routes
+app.use("/api/categories", categoryRoutes);
+
+// Unit routes
+app.use("/api/units", unitRoutes);
+
+// Parties routes
+app.use("/api/parties", partyRoutes);
+
+//Product Routes
+app.use("/api/products", productRoutes);
+
+// Handle unknown routes
+app.use(notFound);
+
+// Centralized error handler
+app.use(errorHandler);
 
 module.exports = app;
