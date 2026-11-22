@@ -11,6 +11,8 @@ const categoryRoutes = require("./modules/categories/category.routes");
 const unitRoutes = require("./modules/units/unit.routes");
 const partyRoutes = require("./modules/parties/party.routes");
 const productRoutes = require("./modules/products/product.routes");
+const inventoryRoutes = require("./modules/inventory/inventory.routes");
+const purchaseRoutes = require("./modules/purchases/purchase.routes");
 
 const app = express();
 
@@ -44,8 +46,14 @@ app.use("/api/units", unitRoutes);
 // Parties routes
 app.use("/api/parties", partyRoutes);
 
-//Product Routes
+// Product routes
 app.use("/api/products", productRoutes);
+
+// Inventory routes
+app.use("/api/inventory", inventoryRoutes);
+
+// Purchase routes
+app.use("/api/purchases", purchaseRoutes);
 
 // Handle unknown routes
 app.use(notFound);

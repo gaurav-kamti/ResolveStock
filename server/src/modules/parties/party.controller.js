@@ -1,32 +1,34 @@
+const mongoose = require("mongoose");
+
 const Party = require("./models/party.model");
+const { createParty: createPartyService } = require("./party.service");
+
 const ApiError = require("../../utils/ApiError");
 
-// Escape special regex characters in search text
+// Escape special regex characters in search input.
 const escapeRegex = (value) => {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 };
 
-// Create party
+// Create a new party.
 const createParty = async (req, res, next) => {
   try {
-    const partyData = req.validated.body;
+    const party = await createPartyService(req.body, req.user.id);
 
-    const party = await Party.create(partyData);
-
-    return res.status(201).json({
+    res.status(201).json({
       success: true,
       message: "Party created successfully.",
-      data: { party },
+      data: party,
     });
   } catch (error) {
-    return next(error);
+    next(error);
   }
 };
 
-// Get all parties
+// Get all parties with filters and pagination.
 const getParties = async (req, res, next) => {
   try {
-    const { page, limit, search, type, isActive } = req.validated.query;
+    const { page = 1, limit = 20, search, type, isActive } = req.query;
 
     const filter = {};
 
@@ -34,15 +36,12 @@ const getParties = async (req, res, next) => {
       filter.type = type;
     }
 
-    if (typeof isActive === "boolean") {
+    if (isActive !== undefined) {
       filter.isActive = isActive;
     }
 
     if (search) {
-      const searchRegex = {
-        $regex: escapeRegex(search),
-        $options: "i",
-      };
+      const searchRegex = new RegExp(escapeRegex(search), "i");
 
       filter.$or = [
         { name: searchRegex },
@@ -54,56 +53,69 @@ const getParties = async (req, res, next) => {
 
     const skip = (page - 1) * limit;
 
-    const [parties, totalParties] = await Promise.all([
-      Party.find(filter).sort({ name: 1 }).skip(skip).limit(limit),
+    const [parties, total] = await Promise.all([
+      Party.find(filter).sort({ name: 1 }).skip(skip).limit(limit).lean(),
 
       Party.countDocuments(filter),
     ]);
 
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
-      message: "Parties fetched successfully.",
-      data: {
-        parties,
-        pagination: {
-          currentPage: page,
-          limit,
-          totalParties,
-          totalPages: Math.ceil(totalParties / limit),
-        },
+      data: parties,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+        hasNextPage: page * limit < total,
+        hasPrevPage: page > 1,
       },
     });
   } catch (error) {
-    return next(error);
+    next(error);
   }
 };
 
-// Get a single party
+// Get a single party by ID.
 const getParty = async (req, res, next) => {
   try {
-    const { id } = req.validated.params;
+    const { id } = req.params;
 
-    const party = await Party.findById(id);
+    const party = await Party.findById(id).lean();
 
     if (!party) {
       throw new ApiError(404, "Party not found.");
     }
 
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
-      message: "Party fetched successfully.",
-      data: { party },
+      data: party,
     });
   } catch (error) {
-    return next(error);
+    next(error);
   }
 };
 
-// Update party
+// Update an existing party.
 const updateParty = async (req, res, next) => {
   try {
-    const { id } = req.validated.params;
-    const updates = req.validated.body;
+    const { id } = req.params;
+
+    const updates = { ...req.body };
+
+    // Opening balances must only be changed through
+    // dedicated accounting operations.
+    if (
+      "openingBalance" in updates ||
+      "openingBalanceType" in updates ||
+      "receivableBalance" in updates ||
+      "payableBalance" in updates
+    ) {
+      throw new ApiError(
+        400,
+        "Opening balances and current balances cannot be modified directly.",
+      );
+    }
 
     const party = await Party.findById(id);
 
@@ -115,13 +127,13 @@ const updateParty = async (req, res, next) => {
 
     await party.save();
 
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
       message: "Party updated successfully.",
-      data: { party },
+      data: party,
     });
   } catch (error) {
-    return next(error);
+    next(error);
   }
 };
 

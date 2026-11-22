@@ -85,6 +85,18 @@ const partySchema = new mongoose.Schema(
       default: "none",
     },
 
+    receivableBalance: {
+      type: Number,
+      default: 0,
+      min: [0, "Receivable balance cannot be negative"],
+    },
+
+    payableBalance: {
+      type: Number,
+      default: 0,
+      min: [0, "Payable balance cannot be negative"],
+    },
+
     isActive: {
       type: Boolean,
       default: true,

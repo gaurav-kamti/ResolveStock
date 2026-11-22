@@ -180,9 +180,55 @@ const listPartiesSchema = z.object({
   }),
 });
 
+const getPartyLedgerSchema = z.object({
+  params: z.object({
+    id: objectIdSchema,
+  }),
+
+  query: z
+    .object({
+      page: z.coerce.number().int().min(1).default(1),
+
+      limit: z.coerce.number().int().min(1).max(100).default(20),
+
+      balanceType: z.enum(["receivable", "payable"]).optional(),
+
+      transactionType: z
+        .enum([
+          "opening_balance",
+          "purchase",
+          "purchase_return",
+          "sale",
+          "sales_return",
+          "payment",
+          "receipt",
+          "adjustment",
+        ])
+        .optional(),
+
+      startDate: z.iso.date().optional(),
+
+      endDate: z.iso.date().optional(),
+    })
+    .refine(
+      (data) => {
+        if (data.startDate && data.endDate) {
+          return data.startDate <= data.endDate;
+        }
+
+        return true;
+      },
+      {
+        message: "Start date cannot be after end date.",
+        path: ["startDate"],
+      },
+    ),
+});
+
 module.exports = {
   createPartySchema,
   updatePartySchema,
   getPartySchema,
   listPartiesSchema,
+  getPartyLedgerSchema,
 };

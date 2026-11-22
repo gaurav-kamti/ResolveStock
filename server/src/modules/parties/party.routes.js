@@ -1,5 +1,7 @@
 const express = require("express");
 
+const { getPartyLedgerHistory } = require("./partyLedger.controller");
+
 const router = express.Router();
 
 const {
@@ -14,6 +16,7 @@ const {
   updatePartySchema,
   getPartySchema,
   listPartiesSchema,
+  getPartyLedgerSchema,
 } = require("./party.validation");
 
 const validate = require("../../middleware/validate.middleware");
@@ -27,6 +30,13 @@ router.post("/", validate(createPartySchema), createParty);
 
 // Get all parties
 router.get("/", validate(listPartiesSchema), getParties);
+
+// Get party ledger history.
+router.get(
+  "/:id/ledger",
+  validate(getPartyLedgerSchema),
+  getPartyLedgerHistory,
+);
 
 // Get one party
 router.get("/:id", validate(getPartySchema), getParty);
