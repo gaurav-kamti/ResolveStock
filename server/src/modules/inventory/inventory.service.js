@@ -15,6 +15,7 @@ const movementDirections = {
 
   sale: "out",
   purchase_return: "out",
+  purchase_cancel: "out",
   adjustment_out: "out",
 };
 
@@ -31,10 +32,15 @@ const performStockMovement = async ({
   direction,
 }) => {
   // Check that the product exists and is active.
-  const product = await Product.findOne({
+  const productFilter = {
     _id: productId,
-    isActive: true,
-  }).session(session);
+  };
+
+  if (type !== "purchase_cancel") {
+    productFilter.isActive = true;
+  }
+
+  const product = await Product.findOne(productFilter).session(session);
 
   if (!product) {
     throw new ApiError(404, "Product not found or inactive.");

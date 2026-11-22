@@ -7,10 +7,14 @@ const {
   createPurchaseSchema,
   getPurchasesSchema,
   getPurchaseByIdSchema,
+  receivePurchaseSchema,
+  cancelPurchaseSchema,
 } = require("./purchase.validation");
 
 const {
   createPurchaseController,
+  receivePurchaseController,
+  cancelPurchaseController,
   getPurchasesController,
   getPurchaseByIdController,
 } = require("./purchase.controller");
@@ -22,6 +26,20 @@ router.use(protect);
 
 // Get purchases with filters and pagination.
 router.get("/", validate(getPurchasesSchema), getPurchasesController);
+
+// Receive a draft purchase.
+router.post(
+  "/:purchaseId/receive",
+  validate(receivePurchaseSchema),
+  receivePurchaseController,
+);
+
+// Cancel a draft or received purchase.
+router.post(
+  "/:purchaseId/cancel",
+  validate(cancelPurchaseSchema),
+  cancelPurchaseController,
+);
 
 // Get a single purchase by ID.
 router.get(

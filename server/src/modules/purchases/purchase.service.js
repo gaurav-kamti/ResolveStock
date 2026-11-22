@@ -1,9 +1,13 @@
 const mongoose = require("mongoose");
 
 const Party = require("../parties/models/party.model");
+const PartyLedger = require("../parties/models/partyLedger.model");
 const Product = require("../products/models/product.model");
+
 const Purchase = require("./models/purchase.model");
 const PurchaseCounter = require("./models/purchaseCounter.model");
+
+const { createStockMovement } = require("../inventory/inventory.service");
 
 const ApiError = require("../../utils/ApiError");
 
@@ -18,7 +22,7 @@ const generatePurchaseNumber = async (session) => {
     { _id: "purchase" },
     { $inc: { sequence: 1 } },
     {
-      new: true,
+      returnDocument: "after",
       upsert: true,
       setDefaultsOnInsert: true,
       session,
@@ -195,6 +199,266 @@ const createPurchase = async ({
   }
 };
 
+// Receive a draft purchase and update stock and supplier balance.
+const receivePurchase = async ({ purchaseId, performedBy }) => {
+  const session = await mongoose.startSession();
+
+  try {
+    let result;
+
+    await session.withTransaction(async () => {
+      // 1. Find the purchase.
+      const purchase = await Purchase.findById(purchaseId).session(session);
+
+      if (!purchase) {
+        throw new ApiError(404, "Purchase not found.");
+      }
+
+      // 2. Only draft purchases can be received.
+      if (purchase.status !== "draft") {
+        throw new ApiError(
+          400,
+          `Only draft purchases can be received. Current status: ${purchase.status}.`,
+        );
+      }
+
+      // 3. Verify the supplier.
+      const supplier = await Party.findOne({
+        _id: purchase.supplier,
+        isActive: true,
+        type: { $in: ["supplier", "both"] },
+      }).session(session);
+
+      if (!supplier) {
+        throw new ApiError(
+          404,
+          "Supplier not found, inactive, or not registered as a supplier.",
+        );
+      }
+
+      // 4. Create stock movements for every purchase item.
+      for (const item of purchase.items) {
+        await createStockMovement({
+          productId: item.product,
+          type: "purchase",
+          quantity: item.quantity,
+          unitCost: item.unitPrice,
+          note: `Purchase received: ${purchase.purchaseNumber}`,
+          performedBy,
+          referenceId: purchase._id,
+          session,
+        });
+      }
+
+      // 5. Record the actual purchase receiving time.
+      const receivedAt = new Date();
+
+      // 6. Increase the supplier's payable balance.
+      const purchaseAmount = roundMoney(purchase.grandTotal);
+
+      if (purchaseAmount > 0) {
+        supplier.payableBalance = roundMoney(
+          supplier.payableBalance + purchaseAmount,
+        );
+
+        await supplier.save({ session });
+
+        // 7. Create the supplier ledger entry.
+        await PartyLedger.create(
+          [
+            {
+              party: supplier._id,
+              transactionType: "purchase",
+              balanceType: "payable",
+              direction: "increase",
+              amount: purchaseAmount,
+              referenceType: "purchase",
+              referenceId: purchase._id,
+              note: `Purchase ${purchase.purchaseNumber} received.`,
+              transactionDate: receivedAt,
+              performedBy,
+            },
+          ],
+          { session },
+        );
+      }
+
+      // 8. Change purchase status only if it is still a draft.
+      const receivedPurchase = await Purchase.findOneAndUpdate(
+        {
+          _id: purchase._id,
+          status: "draft",
+        },
+        {
+          $set: {
+            status: "received",
+            receivedAt,
+          },
+        },
+        {
+          returnDocument: "after",
+          runValidators: true,
+          session,
+        },
+      );
+
+      if (!receivedPurchase) {
+        throw new ApiError(
+          409,
+          "Purchase could not be received. Its status may have changed.",
+        );
+      }
+
+      result = receivedPurchase;
+    });
+
+    return result;
+  } finally {
+    await session.endSession();
+  }
+};
+
+// Cancel a draft or received purchase.
+const cancelPurchase = async ({ purchaseId, reason = "", performedBy }) => {
+  const session = await mongoose.startSession();
+
+  try {
+    let result;
+
+    await session.withTransaction(async () => {
+      // 1. Find the purchase.
+      const purchase = await Purchase.findById(purchaseId).session(session);
+
+      if (!purchase) {
+        throw new ApiError(404, "Purchase not found.");
+      }
+
+      // 2. Prevent duplicate cancellation.
+      if (purchase.status === "cancelled") {
+        throw new ApiError(400, "Purchase is already cancelled.");
+      }
+
+      if (!["draft", "received"].includes(purchase.status)) {
+        throw new ApiError(400, "This purchase cannot be cancelled.");
+      }
+
+      // 3. Record the actual cancellation time.
+      const cancelledAt = new Date();
+
+      // 4. Reverse stock and supplier balance only for received purchases.
+      if (purchase.status === "received") {
+        const supplier = await Party.findById(purchase.supplier).session(
+          session,
+        );
+
+        if (!supplier) {
+          throw new ApiError(404, "Purchase supplier not found.");
+        }
+
+        const purchaseAmount = roundMoney(purchase.grandTotal);
+
+        // Check for payable-decreasing supplier transactions after receipt.
+        const subsequentPayment = await PartyLedger.findOne({
+          party: supplier._id,
+          transactionType: { $in: ["payment", "adjustment"] },
+          balanceType: "payable",
+          direction: "decrease",
+          createdAt: { $gte: purchase.receivedAt },
+        }).session(session);
+
+        if (subsequentPayment) {
+          throw new ApiError(
+            409,
+            "Purchase cannot be cancelled because the supplier has subsequent payment or adjustment transactions. Review the supplier ledger first.",
+          );
+        }
+
+        // Prevent the supplier payable balance from becoming negative.
+        if (supplier.payableBalance < purchaseAmount) {
+          throw new ApiError(
+            409,
+            "Purchase cannot be cancelled because the supplier payable balance is insufficient. Review supplier payments or adjustments first.",
+          );
+        }
+
+        // Reverse each item's stock movement.
+        for (const item of purchase.items) {
+          await createStockMovement({
+            productId: item.product,
+            type: "purchase_cancel",
+            quantity: item.quantity,
+            note: `Purchase cancelled: ${purchase.purchaseNumber}`,
+            performedBy,
+            referenceId: purchase._id,
+            session,
+          });
+        }
+
+        // Reduce the supplier's payable balance.
+        if (purchaseAmount > 0) {
+          supplier.payableBalance = roundMoney(
+            supplier.payableBalance - purchaseAmount,
+          );
+
+          await supplier.save({ session });
+
+          // Record the reversing ledger entry.
+          await PartyLedger.create(
+            [
+              {
+                party: supplier._id,
+                transactionType: "purchase_cancel",
+                balanceType: "payable",
+                direction: "decrease",
+                amount: purchaseAmount,
+                referenceType: "purchase_cancel",
+                referenceId: purchase._id,
+                note: `Purchase ${purchase.purchaseNumber} cancelled.`,
+                transactionDate: cancelledAt,
+                performedBy,
+              },
+            ],
+            { session },
+          );
+        }
+      }
+
+      // 5. Update purchase status with a conditional update.
+      const cancelledPurchase = await Purchase.findOneAndUpdate(
+        {
+          _id: purchase._id,
+          status: purchase.status,
+        },
+        {
+          $set: {
+            status: "cancelled",
+            cancelledAt,
+            cancelledReason: reason,
+          },
+        },
+        {
+          returnDocument: "after",
+          runValidators: true,
+          session,
+        },
+      );
+
+      if (!cancelledPurchase) {
+        throw new ApiError(
+          409,
+          "Purchase could not be cancelled. Its status may have changed.",
+        );
+      }
+
+      result = cancelledPurchase;
+    });
+
+    return result;
+  } finally {
+    await session.endSession();
+  }
+};
+
 // Get purchases with filters and pagination.
 const getPurchases = async ({
   page = 1,
@@ -289,6 +553,8 @@ const getPurchaseById = async (purchaseId) => {
 
 module.exports = {
   createPurchase,
+  receivePurchase,
+  cancelPurchase,
   getPurchases,
   getPurchaseById,
 };

@@ -14,6 +14,7 @@ const partyLedgerSchema = new mongoose.Schema(
       enum: [
         "opening_balance",
         "purchase",
+        "purchase_cancel",
         "purchase_return",
         "sale",
         "sales_return",
@@ -47,6 +48,7 @@ const partyLedgerSchema = new mongoose.Schema(
       enum: [
         "opening_balance",
         "purchase",
+        "purchase_cancel",
         "purchase_return",
         "sale",
         "sales_return",

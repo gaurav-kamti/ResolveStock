@@ -13,20 +13,15 @@ Store contact and address information
 Track opening balances and party balances later through transactions
 
 to fix later
+This only checks the supplier's total payable balance. It doesn't establish whether this particular purchase has been paid.
 
-1.One small issue to fix later
-Your pagination response currently returns:
-{
-"page": "1",
-"limit": "20"
-}
+For example:
+Transaction Amount
+Purchase A ₹1,180
+Purchase B ₹5,000
+Payment against A -₹1,180
+Current payable ₹5,000
 
-These should be numbers, not strings:
-{
-"page": 1,
-"limit": 20
-}
+Your current check would allow cancellation of Purchase A and reduce the payable to ₹3,820, incorrectly reducing the amount owed for Purchase B.
 
-We'll correct that as part of validation and query handling.
-
-2.Test Get http://localhost:5000/api/inventory/
+We shouldn't let that happen.
