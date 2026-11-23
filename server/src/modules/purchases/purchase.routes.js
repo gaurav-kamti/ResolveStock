@@ -35,7 +35,7 @@ router.post(
 );
 
 // Cancel a draft or received purchase.
-router.post(
+router.patch(
   "/:purchaseId/cancel",
   validate(cancelPurchaseSchema),
   cancelPurchaseController,

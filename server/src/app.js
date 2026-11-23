@@ -13,6 +13,7 @@ const partyRoutes = require("./modules/parties/party.routes");
 const productRoutes = require("./modules/products/product.routes");
 const inventoryRoutes = require("./modules/inventory/inventory.routes");
 const purchaseRoutes = require("./modules/purchases/purchase.routes");
+const voucherRoutes = require("./modules/vouchers/voucher.routes");
 
 const app = express();
 
@@ -54,6 +55,9 @@ app.use("/api/inventory", inventoryRoutes);
 
 // Purchase routes
 app.use("/api/purchases", purchaseRoutes);
+
+// Voucher routes*
+app.use("/api/vouchers", voucherRoutes);
 
 // Handle unknown routes
 app.use(notFound);
